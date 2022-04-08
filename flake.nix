@@ -42,6 +42,7 @@
           description = "Simple build script for XNG examples";
         };
       };
+      defaultTemplate = self.templates.xng-build;
     };
 }
 
