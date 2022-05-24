@@ -4,7 +4,7 @@
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages."${system}";
       stdenv = pkgs.gcc49Stdenv; # TODO is this really necessary?
-      customPython = (pkgs.python3.withPackages (pythonPackages: with pythonPackages; [ lxml ]));
+      customPython = (pkgs.python.withPackages (pythonPackages: with pythonPackages; [ lxml ]));
     in
     {
       # build an SKE OPS from a tarball release
