@@ -112,7 +112,7 @@
           mv args *.{bin,c,elf} $out/
         '';
       };
-      
+
       templates = {
         xng-build = {
           path = ./template;
@@ -121,63 +121,61 @@
       };
       templates.default = self.templates.xng-build;
 
-      # checks.x86_64-linux =
-      #   let
-      #     xngSrc = ./14-033.094.ops+armv7a-vmsa-tz+zynq7000.r16736;
-      #     exampleDir = xngSrc + "/xre-examples";
-      #     xngOps = lib.buildXngOps {
-      #       inherit pkgs;
-      #       src = ./14-033.094.ops+armv7a-vmsa-tz+zynq7000.r16736;
-      #     };
-      #     target = "armv7a-vmsa-tz";
-      #   in
-      #   {
-      #     example-hello_world = lib.buildXngSysImage {
-      #       inherit pkgs target xngOps;
-      #       name = "hello_world";
-      #       xcf = exampleDir + "/hello_world/xml";
-      #       partitions.hello_world = exampleDir + "/hello_world/hello_world.c";
-      #     };
-      #     example-queuing_port = lib.buildXngSysImage {
-      #       inherit pkgs target xngOps;
-      #       name = "queuing_port";
-      #       xcf = exampleDir + "/queuing_port/xml";
-      #       partitions.src_partition = exampleDir + "/queuing_port/src0.c";
-      #       partitions.dst_partition = exampleDir + "/queuing_port/dst0.c";
-      #     };
-      #     # example-reset_hypervisor = lib.buildXngSysImage {
-      #     #   inherit name pkgs target xngOps;
-      #     #   xcf = exampleDir + "/reset_hypervisor/xml";
-      #     # };
-      #     example-sampling_port = lib.buildXngSysImage {
-      #       inherit pkgs target xngOps;
-      #       name = "sampling_port";
-      #       xcf = exampleDir + "/sampling_port/xml";
-      #       partitions.src_partition = exampleDir + "/sampling_port/src0.c";
-      #       partitions.dst_partition0 = exampleDir + "/sampling_port/dst0.c";
-      #       partitions.dst_partition1 = exampleDir + "/sampling_port/dst1.c";
-      #     };
-      #     example-sampling_port_smp = lib.buildXngSysImage {
-      #       inherit pkgs target xngOps;
-      #       name = "sampling_port_smp";
-      #       xcf = exampleDir + "/sampling_port_smp/xml";
-      #       partitions.partition0 = exampleDir + "/sampling_port_smp/partition0.c";
-      #       partitions.partition1 = exampleDir + "/sampling_port_smp/partition1.c";
-      #     };
-      #     example-system_timer = lib.buildXngSysImage {
-      #       inherit pkgs target xngOps;
-      #       name = "system_timer";
-      #       xcf = exampleDir + "/system_timer/xml";
-      #       partitions.partition = exampleDir + "/system_timer/system_timer.c";
-      #     };
-      #     example-vfp = lib.buildXngSysImage {
-      #       inherit pkgs target xngOps;
-      #       name = "vfp";
-      #       xcf = exampleDir + "/vfp/xml";
-      #       partitions.partition0 = exampleDir + "/vfp/vfp0.c";
-      #       partitions.partition1 = exampleDir + "/vfp/vfp1.c";
-      #     };
-      #   };
+      checks.x86_64-linux =
+        let
+          xngSrc = ./. + "/14-033.094.ops+${target}+zynq7000.r16736.tbz2";
+          exampleDir = xngOps + "/xre-examples";
+          xngOps = lib.buildXngOps {
+            inherit pkgs;
+            src = xngSrc;
+          };
+          target = "armv7a-vmsa-tz";
+          genCheckFromExample = { name, partitions }: lib.buildXngSysImage {
+            inherit name pkgs target xngOps;
+            xcf = exampleDir + "/${name}/xml";
+            partitions = pkgs.lib.mapAttrs (_: v: exampleDir + "/${name}/${v}") partitions;
+          };
+          meta = with lib; {
+            homepage = "https://fentiss.com/";
+            license = licenses.unfree;
+            broken = true; # comment for checks to be executed
+          };
+        in
+        {
+          example-hello_world = genCheckFromExample {
+            name = "hello_world";
+            partitions.hello_world = "hello_world.c";
+          };
+          example-queuing_port = genCheckFromExample {
+            name = "queuing_port";
+            partitions.src_partition = "src0.c";
+            partitions.dst_partition = "dst0.c";
+          };
+          # example-reset_hypervisor = genCheckFromExample {
+          #   name = "reset_hypervisor";
+          #   xcf = exampleDir + "/reset_hypervisor/xml";
+          # };
+          example-sampling_port = genCheckFromExample {
+            name = "sampling_port";
+            partitions.src_partition = "src0.c";
+            partitions.dst_partition0 = "dst0.c";
+            partitions.dst_partition1 = "dst1.c";
+          };
+          example-sampling_port_smp = genCheckFromExample {
+            name = "sampling_port_smp";
+            partitions.partition0 = "partition0.c";
+            partitions.partition1 = "partition1.c";
+          };
+          example-system_timer = genCheckFromExample {
+            name = "system_timer";
+            partitions.partition = "system_timer.c";
+          };
+          example-vfp = genCheckFromExample {
+            name = "vfp";
+            partitions.partition0 = "vfp0.c";
+            partitions.partition1 = "vfp1.c";
+          };
+        };
     };
 }
 
