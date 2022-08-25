@@ -114,7 +114,7 @@
                 args+=("${name}.${target}.bin@$entry_point")
 
                 echo "building partition ${name}"
-                # TODO check what src is
+                local extra_ld_args=
                 if file --brief ${src} | grep 'C source'
                 then
                   local object_code=${name}.${target}.o
@@ -124,6 +124,7 @@
                 elif file --brief ${src} | grep 'ar archive'
                 then
                   local object_code=${src}
+                  extra_ld_args="--require-defined PartitionMain"
                 fi
 
                 set -x
@@ -133,7 +134,7 @@
                   -lxre.${fp}fp.armv7a-vmsa-tz \
                   -lxc.${fp}fp.armv7a-vmsa-tz \
                   -lfw.${fp}fp.armv7a-vmsa-tz \
-                  --end-group
+                  --end-group $extra_ld_args
                 $OBJCOPY -O binary ${name}.${target}.elf ${name}.${target}.bin
                 { set +x; } 2>/dev/null
 
