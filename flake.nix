@@ -7,23 +7,45 @@
     in
     rec {
       # build an XNG OPS from a tarball release
-      lib.buildXngOps = { pkgs, src, name ? "xng-ops" }: pkgs.stdenv.mkDerivation {
+      lib.buildXngOps = { pkgs, src, name ? "xng-ops", target ? "armv7a-vmsa-tz" }: pkgs.stdenv.mkDerivation {
         inherit name src;
+
         nativeBuildInputs = [ pkgs.autoPatchelfHook ];
         buildInputs = with pkgs; [
           (python3.withPackages (pythonPackages: with pythonPackages; [ lxml ]))
           libxml2
         ];
+
+        buildPhase = ''
+          runHook preInstall
+
+          # propagate all include dirs
+          mkdir nix-support
+          cat << EOF > nix-support/setup-hook
+          export NIX_CFLAGS_COMPILE="$NIX_CFLAGS_COMPILE -isystem $out/lib/include -isystem $out/include/xc -isystem $out/include/xre-${target}"
+          EOF
+          chmod +x nix-support/setup-hook
+
+          # patch path to XNG root in the makefiles at hand
+          for file in $( find -name Makefile -o -name '*.mk' ); do
+            sed --in-place 's|^\(\s*XNG_ROOT_PATH\s*=\s*\).*$|\1$out|' "$file"
+          done
+
+          runHook postInstall
+        '';
+
         installPhase = ''
           runHook preInstall
+
           mkdir $out
-          cp -r . $out/
+          mv * $out/
+
           runHook postInstall
         '';
 
         # meta attributes
         meta = {
-          target = "armv7a-vmsa-tz";
+          inherit target;
         };
       };
 
@@ -84,9 +106,7 @@
             export TARGET_CFLAGS="$NIX_CFLAGS_COMPILE -ffreestanding -mabi=aapcs \
               -mlittle-endian -march=armv7-a -mtune=cortex-a9 -mfpu=neon -DNEON \
               -D${archDefine} -Wall -Wextra -pedantic -std=c99 -fno-builtin -O2 \
-              -fno-short-enums -I${xngOps}/include/xre-${target} \
-              -I${xngOps}/lib/include -I${xngOps}/include/xc -mfloat-abi=${fp} \
-              -mthumb"
+              -fno-short-enums -mfloat-abi=${fp} -mthumb"
 
             echo "building configuration image"
             set -x
