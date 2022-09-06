@@ -2,8 +2,6 @@
   outputs = { self, nixpkgs }:
     let
       system = "x86_64-linux";
-      pkgs = nixpkgs.legacyPackages."${system}";
-      customPython = (pkgs.python.withPackages (pythonPackages: with pythonPackages; [ lxml ]));
     in
     rec {
       # build an XNG OPS from a tarball release
@@ -25,13 +23,12 @@
           setupHook = pkgs.writeTextFile {
             name = "xngSetupHook";
             text = ''
-              addXngIncludeDirs () {
+              addXngFlags () {
                 # make XNG headers discoverable
-                for dir in "$1/lib/include" "$1/include/xc" "$1/include/xre-${target}"
-                do
-                  if [ -d "$dir" ]; then
-                    export NIX_CFLAGS_COMPILE+=" -isystem $dir"
-                  fi
+                for dir in "$1/lib/include" "$1/include/xc" "$1/include/xre-${target}"; do
+                    if [ -d "$dir" ]; then
+                        export NIX_CFLAGS_COMPILE+=" -isystem $dir"
+                    fi
                 done
 
                 # export flags relevant to XNG
@@ -39,7 +36,7 @@
                     -mtune=cortex-a9 -mfpu=neon -DNEON -D${archDefine} -Wall -Wextra -pedantic -std=c99 \
                     -fno-builtin -O2 -fno-short-enums -mthumb"
               }
-              addEnvHooks "$hostOffset" addXngIncludeDirs
+              addEnvHooks "$hostOffset" addXngFlags
             '';
           };
 
@@ -50,6 +47,50 @@
             mkdir $bin $dev $out
             cp -r bin xsd.${target} $bin/
             cp -r cfg lds lib xre-examples $dev/
+            cp -r * $out/
+
+            runHook postInstall
+          '';
+
+          # meta attributes
+          meta = {
+            inherit target;
+          };
+        };
+
+      # build an SKE OPS from a tarball release
+      lib.buildSkeOps = { pkgs, src, name ? "ske-ops", target ? "skelinux" }:
+        let
+          archDefine = builtins.replaceStrings [ "-" ] [ "_" ] (pkgs.lib.toUpper target);
+        in
+        pkgs.stdenv.mkDerivation {
+          inherit name src;
+
+          nativeBuildInputs = [ pkgs.autoPatchelfHook ];
+          buildInputs = with pkgs; [
+            (python2.withPackages (pythonPackages: with pythonPackages; [ lxml ]))
+            libxml2
+          ];
+
+          outputs = [ "bin" "dev" "out" ];
+
+          setupHook = pkgs.writeTextFile {
+            name = "skeSetupHook";
+            text = ''
+              addSKEFlags () {
+                # export flags relevant to SKE
+                export SKE_TARGET_CFLAGS+=" -finstrument-functions -std=c99"
+              }
+              addEnvHooks "$hostOffset" addSKEFlags
+            '';
+          };
+
+          installPhase = ''
+            runHook preInstall
+
+            mkdir $bin $dev $out
+            cp -r bin $bin/
+            cp -r lib examples $dev/
             cp -r * $out/
 
             runHook postInstall
@@ -216,17 +257,24 @@
 
       checks.x86_64-linux =
         let
+          pkgs = nixpkgs.legacyPackages."${system}";
           xngSrc = pkgs.requireFile {
             name = "14-033.094.ops+${xngOps.meta.target}+zynq7000.r16736.tbz2";
             url = "http://fentiss.com";
             sha256 = "1gb0cq3mmmr2fqj49p4svx07h5ccs8v564awlsc56mfjhm6jg3n4";
           };
           # xngSrc = ./. + "/14-033.094.ops+${xngOps.meta.target}+zynq7000.r16736.tbz2";
+          skeSrc = pkgs.requireFile {
+            name = "14-034.010.ops.r711.tbz2";
+            url = "http://fentiss.com";
+            sha256 = "15pdl94502kk0kis8fdni886lybsm7204blra2cnnkidjrdmd4kk";
+          };
           exampleDir = xngOps.dev + "/xre-examples";
           xngOps = lib.buildXngOps {
             inherit pkgs;
             src = xngSrc;
           };
+          skeOps = lib.buildSkeOps { inherit pkgs; src = skeSrc; };
           genCheckFromExample = { name, partitions, hardFp ? false }: lib.buildXngSysImage {
             inherit name pkgs xngOps hardFp;
             xcf = exampleDir + "/${name}/xml";
@@ -276,7 +324,7 @@
             { name = "reset_hypervisor"; }
           ];
         in
-        { inherit xngOps; } //
+        { inherit xngOps skeOps; } //
         (builtins.listToAttrs (builtins.map
           ({ name, ... } @ args: {
             name = "example_${name}";
