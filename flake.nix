@@ -16,15 +16,24 @@
           libxml2
         ];
 
+        setupHook = pkgs.writeTextFile {
+          name = "xngSetupHook";
+          text = ''
+            addXngIncludeDirs () {
+              for dir in "$1/lib/include" "$1/include/xc" "$1/include/xre-${target}"
+              do
+                if [ -d "$dir" ]; then
+                  export NIX_CFLAGS_COMPILE+=" -isystem $dir"
+                fi
+              done
+            }
+
+            addEnvHooks "$targetOffset" addXngIncludeDirs
+          '';
+        };
+
         buildPhase = ''
           runHook preInstall
-
-          # propagate all include dirs
-          mkdir nix-support
-          cat << EOF > nix-support/setup-hook
-          export NIX_CFLAGS_COMPILE="$NIX_CFLAGS_COMPILE -isystem $out/lib/include -isystem $out/include/xc -isystem $out/include/xre-${target}"
-          EOF
-          chmod +x nix-support/setup-hook
 
           # patch path to XNG root in the makefiles at hand
           for file in $( find -name Makefile -o -name '*.mk' ); do
@@ -244,6 +253,7 @@
             { name = "reset_hypervisor"; }
           ];
         in
+        { inherit xngOps; } //
         (builtins.listToAttrs (builtins.map
           ({ name, ... } @ args: {
             name = "example_${name}";
