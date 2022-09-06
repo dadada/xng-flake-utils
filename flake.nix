@@ -16,6 +16,8 @@
           libxml2
         ];
 
+        outputs = [ "bin" "dev" "out" ];
+
         setupHook = pkgs.writeTextFile {
           name = "xngSetupHook";
           text = ''
@@ -27,8 +29,7 @@
                 fi
               done
             }
-
-            addEnvHooks "$targetOffset" addXngIncludeDirs
+            addEnvHooks "$hostOffset" addXngIncludeDirs
           '';
         };
 
@@ -46,8 +47,10 @@
         installPhase = ''
           runHook preInstall
 
-          mkdir $out
-          mv * $out/
+          mkdir $bin $dev $out
+          cp -r bin xsd.${target} $bin/
+          cp -r cfg lds lib xre-examples $dev/
+          cp -r * $out/
 
           runHook postInstall
         '';
@@ -59,19 +62,23 @@
       };
 
       # compile one XNG configuration using the vendored Makefile
-      lib.buildXngConfig = { pkgs, xngOps, name, src, xngConfigurationPath }: pkgs.stdenv.mkDerivation {
-        inherit name src;
-        nativeBuildInputs = [ pkgs.gcc-arm-embedded xngOps ];
-        XNG_ROOT_PATH = xngOps;
-        postPatch = ''
-          for file in $( find -name Makefile -o -name '*.mk' ); do
-            sed --in-place 's|^\(\s*XNG_ROOT_PATH\s*=\s*\).*$|\1${xngOps}|' "$file"
-          done
-          cd '${xngConfigurationPath}'
-        '';
-        dontFixup = true;
-        installPhase = "mkdir $out; cp *.bin *.elf $out/";
-      };
+      lib.buildXngConfig = { pkgs, xngOps, name, src, xngConfigurationPath }:
+        let
+          combinedXngOps = pkgs.symlinkJoin {
+            name = "xngOpsFull";
+            paths = [ xngOps.bin xngOps.dev ];
+          };
+        in
+        pkgs.stdenv.mkDerivation {
+          inherit name src;
+          nativeBuildInputs = [ pkgs.gcc-arm-embedded xngOps.bin ];
+          preBuild = ''
+            cd '${xngConfigurationPath}'
+          '';
+          makeFlags = [ "XNG_ROOT_PATH=${combinedXngOps}" ];
+          dontFixup = true;
+          installPhase = "mkdir $out; cp *.bin *.elf $out/";
+        };
 
       # compile one XNG configuration using a custom nix/bash based builder
       lib.buildXngSysImage =
@@ -94,8 +101,8 @@
           inherit name;
           dontUnpack = true;
           dontFixup = true;
-          nativeBuildInputs = [ xngOps pkgs.file pkgs.xmlstarlet ];
-          buildInputs = [ xngOps ];
+          nativeBuildInputs = [ pkgs.file pkgs.xmlstarlet xngOps.bin ];
+          buildInputs = [ xngOps.dev ];
 
           configurePhase = ''
             runHook preConfigure
@@ -120,7 +127,7 @@
             echo "building configuration image"
             set -x
             $CC $TARGET_CFLAGS -O2 -nostdlib -Wl,--entry=0x0 \
-              -Wl,-T${xngOps}/lds/xcf.lds xcf.c -o xcf.${target}.elf
+              -Wl,-T${xngOps.dev}/lds/xcf.lds xcf.c -o xcf.${target}.elf
             $OBJCOPY -O binary xcf.${target}.elf xcf.${target}.bin
             { set +x; } 2>/dev/null
 
@@ -130,7 +137,7 @@
             local xcf_entry_point=0x200000
 
             local args=("-e" "$hypervisor_entry_point" \
-              "${xngOps}/lib/xng.${target}.bin@$hypervisor_entry_point")
+              "${xngOps.dev}/lib/xng.${target}.bin@$hypervisor_entry_point")
 
             ${builtins.concatStringsSep "\n"
               (pkgs.lib.attrsets.mapAttrsToList (name: src: ''
@@ -158,8 +165,8 @@
 
                 set -x
                 $LD -EL $object_code -o ${name}.${target}.elf \
-                  -Ttext $entry_point -T${xngOps}/lds/xre.lds \
-                  --start-group -L${xngOps}/lib \
+                  -Ttext $entry_point -T${xngOps.dev}/lds/xre.lds \
+                  --start-group -L${xngOps.dev}/lib \
                   -lxre.${fp}fp.armv7a-vmsa-tz \
                   -lxc.${fp}fp.armv7a-vmsa-tz \
                   -lfw.${fp}fp.armv7a-vmsa-tz \
@@ -198,8 +205,13 @@
 
       checks.x86_64-linux =
         let
-          xngSrc = ./. + "/14-033.094.ops+${xngOps.meta.target}+zynq7000.r16736.tbz2";
-          exampleDir = xngOps + "/xre-examples";
+          xngSrc = pkgs.requireFile {
+            name = "14-033.094.ops+${xngOps.meta.target}+zynq7000.r16736.tbz2";
+            url = "http://fentiss.com";
+            sha256 = "1gb0cq3mmmr2fqj49p4svx07h5ccs8v564awlsc56mfjhm6jg3n4";
+          };
+          # xngSrc = ./. + "/14-033.094.ops+${xngOps.meta.target}+zynq7000.r16736.tbz2";
+          exampleDir = xngOps.dev + "/xre-examples";
           xngOps = lib.buildXngOps {
             inherit pkgs;
             src = xngSrc;
