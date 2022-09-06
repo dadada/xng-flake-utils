@@ -7,59 +7,59 @@
     in
     rec {
       # build an XNG OPS from a tarball release
-      lib.buildXngOps = { pkgs, src, name ? "xng-ops", target ? "armv7a-vmsa-tz" }: pkgs.stdenv.mkDerivation {
-        inherit name src;
+      lib.buildXngOps = { pkgs, src, name ? "xng-ops", target ? "armv7a-vmsa-tz" }:
+        let
+          archDefine = builtins.replaceStrings [ "-" ] [ "_" ] (pkgs.lib.toUpper target);
+        in
+        pkgs.stdenv.mkDerivation {
+          inherit name src;
 
-        nativeBuildInputs = [ pkgs.autoPatchelfHook ];
-        buildInputs = with pkgs; [
-          (python3.withPackages (pythonPackages: with pythonPackages; [ lxml ]))
-          libxml2
-        ];
+          nativeBuildInputs = [ pkgs.autoPatchelfHook ];
+          buildInputs = with pkgs; [
+            (python3.withPackages (pythonPackages: with pythonPackages; [ lxml ]))
+            libxml2
+          ];
 
-        outputs = [ "bin" "dev" "out" ];
+          outputs = [ "bin" "dev" "out" ];
 
-        setupHook = pkgs.writeTextFile {
-          name = "xngSetupHook";
-          text = ''
-            addXngIncludeDirs () {
-              for dir in "$1/lib/include" "$1/include/xc" "$1/include/xre-${target}"
-              do
-                if [ -d "$dir" ]; then
-                  export NIX_CFLAGS_COMPILE+=" -isystem $dir"
-                fi
-              done
-            }
-            addEnvHooks "$hostOffset" addXngIncludeDirs
+          setupHook = pkgs.writeTextFile {
+            name = "xngSetupHook";
+            text = ''
+              addXngIncludeDirs () {
+                # make XNG headers discoverable
+                for dir in "$1/lib/include" "$1/include/xc" "$1/include/xre-${target}"
+                do
+                  if [ -d "$dir" ]; then
+                    export NIX_CFLAGS_COMPILE+=" -isystem $dir"
+                  fi
+                done
+
+                # export flags relevant to XNG
+                export XNG_TARGET_CFLAGS="-ffreestanding -mabi=aapcs -mlittle-endian -march=armv7-a \
+                    -mtune=cortex-a9 -mfpu=neon -DNEON -D${archDefine} -Wall -Wextra -pedantic -std=c99 \
+                    -fno-builtin -O2 -fno-short-enums -mthumb"
+              }
+              addEnvHooks "$hostOffset" addXngIncludeDirs
+            '';
+          };
+
+
+          installPhase = ''
+            runHook preInstall
+
+            mkdir $bin $dev $out
+            cp -r bin xsd.${target} $bin/
+            cp -r cfg lds lib xre-examples $dev/
+            cp -r * $out/
+
+            runHook postInstall
           '';
+
+          # meta attributes
+          meta = {
+            inherit target;
+          };
         };
-
-        buildPhase = ''
-          runHook preInstall
-
-          # patch path to XNG root in the makefiles at hand
-          for file in $( find -name Makefile -o -name '*.mk' ); do
-            sed --in-place 's|^\(\s*XNG_ROOT_PATH\s*=\s*\).*$|\1$out|' "$file"
-          done
-
-          runHook postInstall
-        '';
-
-        installPhase = ''
-          runHook preInstall
-
-          mkdir $bin $dev $out
-          cp -r bin xsd.${target} $bin/
-          cp -r cfg lds lib xre-examples $dev/
-          cp -r * $out/
-
-          runHook postInstall
-        '';
-
-        # meta attributes
-        meta = {
-          inherit target;
-        };
-      };
 
       # compile one XNG configuration using the vendored Makefile
       lib.buildXngConfig = { pkgs, xngOps, name, src, xngConfigurationPath }:
@@ -87,15 +87,15 @@
         , name
         , partitions
         , xcf
-        , target ? xngOps.meta.target
         , hardFp ? false
         , stdenv ? (if hardFp then
             pkgs.pkgsCross.armhf-embedded.stdenv
           else pkgs.pkgsCross.arm-embedded.stdenv)
         }:
         let
-          archDefine = builtins.replaceStrings [ "-" ] [ "_" ] (pkgs.lib.toUpper target);
+          target = xngOps.meta.target;
           fp = if hardFp then "hard" else "soft";
+          baseUrl = "http://www.fentiss.com/";
         in
         stdenv.mkDerivation {
           inherit name;
@@ -117,35 +117,49 @@
 
           buildPhase = ''
             runHook preBuild
+
+            # fail on everything
             set -Eeuo pipefail
 
-            export TARGET_CFLAGS="$NIX_CFLAGS_COMPILE -ffreestanding -mabi=aapcs \
-              -mlittle-endian -march=armv7-a -mtune=cortex-a9 -mfpu=neon -DNEON \
-              -D${archDefine} -Wall -Wextra -pedantic -std=c99 -fno-builtin -O2 \
-              -fno-short-enums -mfloat-abi=${fp} -mthumb"
+            export TARGET_CFLAGS="$NIX_CFLAGS_COMPILE $XNG_TARGET_CFLAGS -mfloat-abi=${fp}"
 
             echo "building configuration image"
             set -x
-            $CC $TARGET_CFLAGS -O2 -nostdlib -Wl,--entry=0x0 \
-              -Wl,-T${xngOps.dev}/lds/xcf.lds xcf.c -o xcf.${target}.elf
+            $CC $TARGET_CFLAGS -O2 -nostdlib -Wl,--entry=0x0 -Wl,-T${xngOps.dev}/lds/xcf.lds xcf.c \
+                -o xcf.${target}.elf
             $OBJCOPY -O binary xcf.${target}.elf xcf.${target}.bin
             { set +x; } 2>/dev/null
 
             echo "gathering information"
-            local hypervisor_xml=$(xml sel -N 'n=http://www.fentiss.com/xngModuleXml' -t -v '/n:Module/n:Hypervisor/@hRef' ${xcf}/module.xml)
-            local hypervisor_entry_point=$(xml sel -N 'n=http://www.fentiss.com/xngHypervisorXml' -t -v '/n:Hypervisor/@entryPoint' ${xcf}/$hypervisor_xml)
+            local hypervisor_xml=$(xml sel -N 'n=${baseUrl}xngModuleXml' -t \
+                -v '/n:Module/n:Hypervisor/@hRef' ${xcf}/module.xml)
+            local hypervisor_entry_point=$(xml sel -N 'n=${baseUrl}xngHypervisorXml' -t \
+                -v '/n:Hypervisor/@entryPoint' ${xcf}/$hypervisor_xml)
             local xcf_entry_point=0x200000
 
             local args=("-e" "$hypervisor_entry_point" \
-              "${xngOps.dev}/lib/xng.${target}.bin@$hypervisor_entry_point")
+                "${xngOps.dev}/lib/xng.${target}.bin@$hypervisor_entry_point")
 
             ${builtins.concatStringsSep "\n"
               (pkgs.lib.attrsets.mapAttrsToList (name: src: ''
                 echo "gathering information for partition ${name}"
-                local partition_xml=$(xml sel -N 'n=http://www.fentiss.com/xngPartitionXml' -t -if '/n:Partition/@name="${name}"' --inp-name $(find ${xcf} -name '*.xml'))
-                [ -f "$partition_xml" ] || (echo "unable to find xml for partition ${name}"; exit 127)
-                local entry_point=$(xml sel -N 'n=http://www.fentiss.com/xngPartitionXml' -t -v '/n:Partition/@entryPoint' $partition_xml)
-                (( entry_point >= 0 )) || (echo "unable to extract partition entry point for partition ${name}"; exit 1)
+                local partition_xml=$(xml sel -N 'n=${baseUrl}xngPartitionXml' -t \
+                    -if '/n:Partition/@name="${name}"' --inp-name $(find ${xcf} -name '*.xml'))
+
+                # check partition xml file exits
+                [ -f "$partition_xml" ] || {
+                    echo "unable to find xml for partition ${name}"
+                    exit 127
+                }
+
+                local entry_point=$(xml sel -N 'n=${baseUrl}xngPartitionXml' -t \
+                    -v '/n:Partition/@entryPoint' $partition_xml)
+
+                # check entry point is a positive number
+                (( entry_point >= 0 )) || {
+                    echo "unable to extract partition entry point for partition ${name}"
+                    exit 1
+                }
 
                 args+=("${name}.${target}.bin@$entry_point")
 
@@ -153,24 +167,21 @@
                 local extra_ld_args=
                 if file --brief ${src} | grep 'C source'
                 then
-                  local object_code=${name}.${target}.o
-                  set -x
-                  $CC $TARGET_CFLAGS -c -o $object_code ${src}
-                  { set +x; } 2>/dev/null
+                    local object_code=${name}.${target}.o
+                    set -x
+                    $CC $TARGET_CFLAGS -c -o $object_code ${src}
+                    { set +x; } 2>/dev/null
                 elif file --brief ${src} | grep 'ar archive'
                 then
-                  local object_code=${src}
-                  extra_ld_args="--require-defined PartitionMain"
+                    local object_code=${src}
+                    extra_ld_args="--require-defined PartitionMain"
                 fi
 
                 set -x
                 $LD -EL $object_code -o ${name}.${target}.elf \
-                  -Ttext $entry_point -T${xngOps.dev}/lds/xre.lds \
-                  --start-group -L${xngOps.dev}/lib \
-                  -lxre.${fp}fp.armv7a-vmsa-tz \
-                  -lxc.${fp}fp.armv7a-vmsa-tz \
-                  -lfw.${fp}fp.armv7a-vmsa-tz \
-                  --end-group $extra_ld_args
+                    -Ttext $entry_point -T${xngOps.dev}/lds/xre.lds --start-group \
+                    -lxre.${fp}fp.armv7a-vmsa-tz -lxc.${fp}fp.armv7a-vmsa-tz -lfw.${fp}fp.armv7a-vmsa-tz \
+                    --end-group $extra_ld_args
                 $OBJCOPY -O binary ${name}.${target}.elf ${name}.${target}.bin
                 { set +x; } 2>/dev/null
 
