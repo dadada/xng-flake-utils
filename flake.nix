@@ -102,6 +102,19 @@
           };
         };
 
+      # build a LithOS OPS
+      lib.buildLithOsOps = { pkgs, src, name ? "lithos-ops" }: pkgs.stdenvNoCC.mkDerivation {
+        inherit name src;
+        dontStrip = true;
+        dontPatchELF = true;
+        installPhase = ''
+          runHook preInstall
+          mkdir $out
+          mv * $out
+          runHook postInstall
+        '';
+      };
+
       # compile one XNG configuration using the vendored Makefile
       lib.buildXngConfig = { pkgs, xngOps, name, src, xngConfigurationPath }:
         let
@@ -122,12 +135,14 @@
         };
 
       # compile one XNG configuration using a custom nix/bash based builder
+      # partitions is a map of a partition name to an attrset containing the src
       lib.buildXngSysImage =
         { pkgs
         , xngOps
         , name
         , partitions
         , xcf
+        , lithOsOps ? null
         , hardFp ? false
         , stdenv ? (if hardFp then
             pkgs.pkgsCross.armhf-embedded.stdenv
@@ -138,6 +153,8 @@
           fp = if hardFp then "hard" else "soft";
           baseUrl = "http://www.fentiss.com/";
         in
+        # either an lithOsOps is available, or no partition requires one.
+        assert lithOsOps != null || pkgs.lib.lists.all ({ enableLithOs ? false, ... }: !enableLithOs) (pkgs.lib.attrValues partitions);
         stdenv.mkDerivation {
           inherit name;
           dontUnpack = true;
@@ -182,7 +199,7 @@
                 "${xngOps.dev}/lib/xng.${target}.bin@$hypervisor_entry_point")
 
             ${builtins.concatStringsSep "\n"
-              (pkgs.lib.attrsets.mapAttrsToList (name: src: ''
+              (pkgs.lib.attrsets.mapAttrsToList (name: { src, enableLithOs ? false, ltcf ? null }: ''
                 echo "gathering information for partition ${name}"
                 local partition_xml=$(xml sel -N 'n=${baseUrl}xngPartitionXml' -t \
                     -if '/n:Partition/@name="${name}"' --inp-name $(find ${xcf} -name '*.xml'))
@@ -205,24 +222,45 @@
                 args+=("${name}.${target}.bin@$entry_point")
 
                 echo "building partition ${name}"
-                local extra_ld_args=
+                local object_code=()
+                local extra_ld_args=("-Ttext $entry_point")
+
                 if file --brief ${src} | grep 'C source'
                 then
-                    local object_code=${name}.${target}.o
+                    local object_code+=("${name}.${target}.o")
                     set -x
-                    $CC $TARGET_CFLAGS -c -o $object_code ${src}
+                    $CC $TARGET_CFLAGS -c -o ''${object_code[-1]} ${src}
                     { set +x; } 2>/dev/null
                 elif file --brief ${src} | grep 'ar archive'
                 then
-                    local object_code=${src}
-                    extra_ld_args="--require-defined PartitionMain"
+                    local object_code+=("${src}")
+                    extra_ld_args+=("--require-defined PartitionMain")
                 fi
 
+                ${ if enableLithOs then ''
+                    if [ -z "${ltcf}" ] || {
+                        echo "unable to find '${ltcf}'"
+                        exit 127
+                    }
+                    set -x
+                    $CC $TARGET_CFLAGS --include ${ltcf} -c -o ${ltcf}.o ${lithOsOps}/lib/ltcf.c
+                    { set +x; } 2>/dev/null
+
+                    object_code+=("${lithOsOps}/lib/lte_kernel.o" "${ltcf}.o")
+                    extra_ld_args+=("-T${lithOsOps}/lds/lithos-${target}.lds")
+                '' else ''
+                    extra_ld_args+=(
+                        "-T${xngOps.dev}/lds/xre.lds"
+                        "--start-group"
+                        "-lxre.${fp}fp.armv7a-vmsa-tz"
+                        "-lxc.${fp}fp.armv7a-vmsa-tz"
+                        "-lfw.${fp}fp.armv7a-vmsa-tz"
+                        "--end-group"
+                    )
+                '' }
+
                 set -x
-                $LD -EL $object_code -o ${name}.${target}.elf \
-                    -Ttext $entry_point -T${xngOps.dev}/lds/xre.lds --start-group \
-                    -lxre.${fp}fp.armv7a-vmsa-tz -lxc.${fp}fp.armv7a-vmsa-tz -lfw.${fp}fp.armv7a-vmsa-tz \
-                    --end-group $extra_ld_args
+                $LD -EL ''${object_code[@]} -o ${name}.${target}.elf ''${extra_ld_args[@]}
                 $OBJCOPY -O binary ${name}.${target}.elf ${name}.${target}.bin
                 { set +x; } 2>/dev/null
 
@@ -289,7 +327,7 @@
               inherit name pkgs hardFp;
               xngOps = ops;
               xcf = exampleDir + "/${name}/xml";
-              partitions = pkgs.lib.mapAttrs (_: v: exampleDir + "/${name}/${v}") partitions;
+              partitions = pkgs.lib.mapAttrs (_: v: { src = exampleDir + "/${name}/${v}"; }) partitions;
             };
             meta = with lib; {
               homepage = "https://fentiss.com/";
@@ -352,17 +390,19 @@
               })
               (examples ++ makeFileOnlyExamples)));
           };
-          xng-lithos = {
-            ops = lib.buildXngOps { inherit pkgs; srcs = [ 
-              fentISS-srcs.xng 
-              fentISS-srcs.lithos 
-            ]; };
-          };
+          # xng-lithos = {
+          #   ops = lib.buildXngOps {
+          #     inherit pkgs; srcs = [
+          #     fentISS-srcs.xng
+          #     fentISS-srcs.lithos
+          #   ];
+          #   };
+          # };
         in
         {
           inherit skeOps;
           xng-smp-ops = xng-smp.ops;
-          xng-lithos-ops= xng-lithos.ops;
+          # xng-lithos-ops = xng-lithos.ops;
         }
         // xng-smp.normalChecks
         // xng-smp.makefileChecks;
