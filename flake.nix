@@ -134,6 +134,39 @@
           installPhase = "mkdir $out; cp *.bin *.elf $out/";
         };
 
+      lib.buildPartitionC =
+        { pkgs
+        , xns-ops
+        , name
+        , src ? null
+        , srcs ? null
+        , hardFp ? false
+        , stdenv ? (if hardFp then
+            pkgs.pkgsCross.armhf-embedded.stdenv
+          else pkgs.pkgsCross.arm-embedded.stdenv)
+        }: { };
+
+
+      lib.load-xml = { pkgs, file }: builtins.fromJSON (builtins.readFile (pkgs.runCommandNoCC "convert-xml-to-json" { }
+        "${pkgs.dasel}/bin/dasel --file ${file} --write json > $out"));
+
+      lib.parse-xcf = { pkgs, src }:
+        let
+          parsed-xml = self.lib.load-xml { inherit pkgs; file = src + "/module.xml"; };
+          replace-hRef = attrset: pkgs.lib.mapAttrsRecursive
+            (path: value:
+              if pkgs.lib.last path == "-hRef" && builtins.isString value then
+                self.lib.load-xml { inherit pkgs; file = src + "/${value}"; }
+              else value)
+            attrset;
+          expanded-xml = replace-hRef (replace-hRef parsed-xml);
+        in
+        expanded-xml;
+      # lib.build-xcf = { pkgs, xng-ops, xng-config, src }: { };
+      # lib.build-partition = { pkgs, xng-ops, xng-config, src, name }: { };
+      # lib.build-sys-image = { pkgs, xng-ops, xng-config, partitions }: { };
+
+
       # compile one XNG configuration using a custom nix/bash based builder
       # partitions is a map of a partition name to an attrset containing the src
       lib.buildXngSysImage =
