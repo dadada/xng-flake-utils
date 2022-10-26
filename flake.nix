@@ -267,20 +267,28 @@
                 elif file --brief ${src} | grep 'ar archive'
                 then
                     local object_code+=("${src}")
-                    extra_ld_args+=("--require-defined PartitionMain")
+                    extra_ld_args+=("--require-defined ${if enableLithOs then "main" else "PartitionMain"}")
                 fi
 
                 ${ if enableLithOs then ''
-                    if [ -z "${ltcf}" ] || {
-                        echo "unable to find '${ltcf}'"
+                    [ -f "${ltcf}" ] || {
+                        echo "unable to find ${ltcf}"
                         exit 127
                     }
+                    local ltcf_out_file="${name}_ltcf.o"
                     set -x
-                    $CC $TARGET_CFLAGS --include ${ltcf} -c -o ${ltcf}.o ${lithOsOps}/lib/ltcf.c
+                    $CC $TARGET_CFLAGS -isystem ${lithOsOps}/include --include ${ltcf} \
+                        -c -o "$ltcf_out_file" ${lithOsOps}/lib/ltcf.c
                     { set +x; } 2>/dev/null
 
-                    object_code+=("${lithOsOps}/lib/lte_kernel.o" "${ltcf}.o")
-                    extra_ld_args+=("-T${lithOsOps}/lds/lithos-${target}.lds")
+                    object_code+=("${lithOsOps}/lib/lte_kernel.o" "$ltcf_out_file")
+                    extra_ld_args+=(
+                        "-T${lithOsOps}/lds/lithos-xng-${target}.lds"
+                        "--start-group"
+                        "-lxc.${fp}fp.armv7a-vmsa-tz"
+                        "-lfw.${fp}fp.armv7a-vmsa-tz"
+                        "--end-group"
+                    )
                 '' else ''
                     extra_ld_args+=(
                         "-T${xngOps.dev}/lds/xre.lds"
