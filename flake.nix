@@ -195,6 +195,9 @@
           nativeBuildInputs = [ pkgs.file pkgs.xmlstarlet xngOps.bin ];
           buildInputs = [ xngOps.dev ];
 
+          # We don't want nix to mess with compiler flags more than necessary
+          hardeningDisable = [ "all" ];
+
           configurePhase = ''
             runHook preConfigure
 
