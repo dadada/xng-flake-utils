@@ -192,15 +192,29 @@
           dontUnpack = true;
           dontFixup = true;
           nativeBuildInputs = [ pkgs.file pkgs.xmlstarlet xngOps.bin ];
-          buildInputs = [ xngOps.dev ];
+          buildInputs = [ xngOps.dev lithOsOps ];
 
           # We don't want nix to mess with compiler flags more than necessary
           hardeningDisable = [ "all" ];
 
           configurePhase = ''
             runHook preConfigure
+                
+            info(){
+              # bold green
+              local INFO_BEGIN_ESCAPE='\033[1;32m'
+              local INFO_END_ESCAPE='\033[0m'
+              echo -e "''${INFO_BEGIN_ESCAPE}$1''${INFO_END_ESCAPE}"
+            }
 
-            echo "configuring xcf for ${name}"
+            error(){
+              # bold red
+              local ERROR_BEGIN_ESCAPE='\033[1;31m'
+              local ERROR_END_ESCAPE='\033[0m'
+              echo -e "''${ERROR_BEGIN_ESCAPE}$1''${ERROR_END_ESCAPE}"
+            }
+
+            info "configuring xcf for ${name}"
             set -x
             xcparser.${target} ${xcf}/module.xml xcf.c
             { set +x; } 2>/dev/null
@@ -216,14 +230,14 @@
 
             export TARGET_CFLAGS="$NIX_CFLAGS_COMPILE $XNG_TARGET_CFLAGS -mfloat-abi=${fp}"
 
-            echo "building configuration image"
+            info "building configuration image"
             set -x
             $CC $TARGET_CFLAGS -O2 -nostdlib -Wl,--entry=0x0 -Wl,-T${xngOps.dev}/lds/xcf.lds xcf.c \
                 -o xcf.${target}.elf
             $OBJCOPY -O binary xcf.${target}.elf xcf.${target}.bin
             { set +x; } 2>/dev/null
 
-            echo "gathering information"
+            info "gathering information"
             local hypervisor_xml=$(xml sel -N 'n=${baseUrl}xngModuleXml' -t \
                 -v '/n:Module/n:Hypervisor/@hRef' ${xcf}/module.xml)
             local hypervisor_entry_point=$(xml sel -N 'n=${baseUrl}xngHypervisorXml' -t \
@@ -235,13 +249,13 @@
 
             ${builtins.concatStringsSep "\n"
               (pkgs.lib.attrsets.mapAttrsToList (name: { src, enableLithOs ? false, ltcf ? null }: ''
-                echo "gathering information for partition ${name}"
+                info "gathering information for partition ${name}"
                 local partition_xml=$(xml sel -N 'n=${baseUrl}xngPartitionXml' -t \
                     -if '/n:Partition/@name="${name}"' --inp-name $(find ${xcf} -name '*.xml'))
 
                 # check partition xml file exits
                 [ -f "$partition_xml" ] || {
-                    echo "unable to find xml for partition ${name}"
+                    error "unable to find xml for partition ${name}"
                     exit 127
                 }
 
@@ -250,13 +264,13 @@
 
                 # check entry point is a positive number
                 (( entry_point >= 0 )) || {
-                    echo "unable to extract partition entry point for partition ${name}"
+                    error "unable to extract partition entry point for partition ${name}"
                     exit 1
                 }
 
                 args+=("${name}.${target}.bin@$entry_point")
 
-                echo "building partition ${name}"
+                info "building partition ${name}"
                 local object_code=()
                 local extra_ld_args=("-Ttext $entry_point")
 
@@ -274,7 +288,7 @@
 
                 ${ if enableLithOs then ''
                     [ -f "${ltcf}" ] || {
-                        echo "unable to find ${ltcf}"
+                        error "unable to find ltcf ${ltcf} for partition ${name}"
                         exit 127
                     }
                     local ltcf_out_file="${name}_ltcf.o"
@@ -311,7 +325,7 @@
 
             args+=("xcf.${target}.bin@$xcf_entry_point" "sys_img.elf")
 
-            echo "building image"
+            info "building image"
             set -x
             TARGET_CC="$CC" elfbdr.py ''${args[@]}
             { set +x; } 2>/dev/null
@@ -336,119 +350,16 @@
       };
       templates.default = self.templates.xng-build;
 
+      ### checks against known fentISS releases
       checks.x86_64-linux =
         let
-          pkgs = nixpkgs.legacyPackages."${system}";
-          target = "armv7a-vmsa-tz";
-          fentISS-srcs = {
-            xng = pkgs.requireFile {
-              name = "14-033.094.ops+${target}+zynq7000.r14040.tbz2";
-              url = "http://fentiss.com";
-              sha256 = "01wrisyqhhi6v4pp4cxy60a13a5w3h5a3jnbyzmssk4q6gkkrd9i";
-            };
-            xng-smp = pkgs.requireFile {
-              name = "14-033.094.ops+${target}+zynq7000.r16736.tbz2";
-              url = "http://fentiss.com";
-              sha256 = "1gb0cq3mmmr2fqj49p4svx07h5ccs8v564awlsc56mfjhm6jg3n4";
-            };
-            lithos = pkgs.requireFile {
-              name = "020.080.ops.r7048.XNG-r13982.tbz2";
-              url = "https://fentiss.com";
-              sha256 = "080pxsmwj8hh0dirb8x3225gvpmk48lb54lf97bggp98jgss6kls";
-            };
-            ske = pkgs.requireFile {
-              name = "14-034.010.ops.r711.tbz2";
-              url = "http://fentiss.com";
-              sha256 = "15pdl94502kk0kis8fdni886lybsm7204blra2cnnkidjrdmd4kk";
-            };
+          pkgs = import nixpkgs {
+            inherit system;
           };
-          skeOps = lib.buildSkeOps { inherit pkgs; src = fentISS-srcs.ske; };
-          xng-smp = rec {
-            ops = lib.buildXngOps { inherit pkgs; src = fentISS-srcs.xng-smp; };
-            exampleDir = ops.dev + "/xre-examples";
-            genCheckFromExample = { name, partitions, hardFp ? false }: lib.buildXngSysImage {
-              inherit name pkgs hardFp;
-              xngOps = ops;
-              xcf = exampleDir + "/${name}/xml";
-              partitions = pkgs.lib.mapAttrs (_: v: { src = exampleDir + "/${name}/${v}"; }) partitions;
-            };
-            meta = with lib; {
-              homepage = "https://fentiss.com/";
-              license = licenses.unfree;
-            };
-            examples = [
-              {
-                name = "hello_world";
-                partitions.Partition0 = "hello_world.c";
-              }
-              {
-                name = "queuing_port";
-                partitions.src_partition = "src0.c";
-                partitions.dst_partition = "dst0.c";
-              }
-              # reset_hypervisor = genCheckFromExample {
-              #   name = "reset_hypervisor";
-              #   xcf = exampleDir + "/reset_hypervisor/xml";
-              # };
-              {
-                name = "sampling_port";
-                partitions.src_partition = "src0.c";
-                partitions.dst_partition0 = "dst0.c";
-                partitions.dst_partition1 = "dst1.c";
-              }
-              {
-                name = "sampling_port_smp";
-                partitions.Partition0 = "partition0.c";
-                partitions.Partition1 = "partition1.c";
-              }
-              {
-                name = "system_timer";
-                partitions.Partition0 = "system_timer.c";
-              }
-              {
-                name = "vfp";
-                partitions.Partition0 = "vfp0.c";
-                partitions.Partition1 = "vfp1.c";
-                hardFp = true;
-              }
-            ];
-            makeFileOnlyExamples = [
-              { name = "reset_hypervisor"; }
-            ];
-            normalChecks = (builtins.listToAttrs (builtins.map
-              ({ name, ... } @ args: {
-                name = "example_${name}";
-                value = xng-smp.genCheckFromExample args;
-              })
-              examples));
-            makefileChecks = (builtins.listToAttrs (builtins.map
-              ({ name, ... } @ args: {
-                name = "makefile_example_${name}";
-                value = lib.buildXngConfig rec {
-                  inherit name pkgs;
-                  xngOps = xng-smp.ops;
-                  src = fentISS-srcs.xng-smp;
-                  xngConfigurationPath = "xre-examples/${name}";
-                };
-              })
-              (examples ++ makeFileOnlyExamples)));
-          };
-          # xng-lithos = {
-          #   ops = lib.buildXngOps {
-          #     inherit pkgs; srcs = [
-          #     fentISS-srcs.xng
-          #     fentISS-srcs.lithos
-          #   ];
-          #   };
-          # };
         in
-        {
-          inherit skeOps;
-          xng-smp-ops = xng-smp.ops;
-          # xng-lithos-ops = xng-lithos.ops;
-        }
-        // xng-smp.normalChecks
-        // xng-smp.makefileChecks;
+        { }
+        // (import ./checks/xng-1.4-smp.nix { inherit pkgs; xng-flake-utils = self; })
+        // (import ./checks/xng-1.3-monocore.nix { inherit pkgs; xng-flake-utils = self; })
+        // (import ./checks/ske-2.1.0.nix { inherit pkgs; xng-flake-utils = self; });
     };
 }
-
