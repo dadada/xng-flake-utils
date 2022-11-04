@@ -115,25 +115,6 @@
         '';
       };
 
-      # compile one XNG configuration using the vendored Makefile
-      lib.buildXngConfig = { pkgs, xngOps, name, src, xngConfigurationPath }:
-        let
-          combinedXngOps = pkgs.symlinkJoin {
-            name = "xngOpsFull";
-            paths = [ xngOps.bin xngOps.dev ];
-          };
-        in
-        pkgs.stdenv.mkDerivation {
-          inherit name src;
-          nativeBuildInputs = [ pkgs.gcc-arm-embedded xngOps.bin ];
-          preBuild = ''
-            cd '${xngConfigurationPath}'
-          '';
-          makeFlags = [ "XNG_ROOT_PATH=${combinedXngOps}" ];
-          dontFixup = true;
-          installPhase = "mkdir $out; cp *.bin *.elf $out/";
-        };
-
       lib.buildPartitionC =
         { pkgs
         , xns-ops
@@ -153,13 +134,31 @@
       lib.parse-xcf = { pkgs, src }:
         let
           parsed-xml = self.lib.load-xml { inherit pkgs; file = src + "/module.xml"; };
-          replace-hRef = attrset: pkgs.lib.mapAttrsRecursive
-            (path: value:
-              if pkgs.lib.last path == "-hRef" && builtins.isString value then
-                self.lib.load-xml { inherit pkgs; file = src + "/${value}"; }
-              else value)
-            attrset;
-          expanded-xml = replace-hRef (replace-hRef parsed-xml);
+          updater = attribute: old: (self.lib.load-xml { inherit pkgs; file = src + "/${old."-hRef"}"; }).${attribute};
+          merged = pkgs.lib.updateManyAttrsByPath [
+            {
+              path = [ "Module" "Channels" ];
+              update = updater "Channels";
+            }
+            {
+              path = [ "Module" "Hypervisor" ];
+              update = updater "Hypervisor";
+            }
+            {
+              path = [ "Module" "MultiPartitionHMTables" ];
+              update = updater "MultiPartitionHmTables"; # Why is the case different between both?!!
+            }
+            {
+              path = [ "Module" "Partitions" ];
+              update = old: builtins.map (updater "Partition") old.${"Partition"};
+            }
+            {
+              path = [ "Module" "Schedules" ];
+              update = updater "Schedules";
+            }
+          ]
+            parsed-xml;
+          expanded-xml = merged;
         in
         expanded-xml;
       # lib.build-xcf = { pkgs, xng-ops, xng-config, src }: { };
