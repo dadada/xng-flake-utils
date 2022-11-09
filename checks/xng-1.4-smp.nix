@@ -19,7 +19,13 @@ let
   genCheckFromExample = { name, partitions, hardFp ? false }: xng-flake-utils.lib.buildXngSysImage {
     inherit name pkgs hardFp;
     xngOps = xng-ops;
-    xcf = exampleDir + "/${name}/xml";
+    xcf = pkgs.runCommandNoCC "patch-src" { } ''
+      cp -r ${exampleDir + "/${name}/xml"} $out/
+      for file in $(find $out -name hypervisor.xml)
+      do
+        substituteInPlace "$file" --replace 'baseAddr="0xE0001000"' 'baseAddr="0xE0000000"'
+      done
+    '';
     partitions = pkgs.lib.mapAttrs (_: v: { src = exampleDir + "/${name}/${v}"; }) partitions;
   };
   meta = with pkgs.lib; {

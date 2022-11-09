@@ -13,13 +13,21 @@ let
       sha256 = "080pxsmwj8hh0dirb8x3225gvpmk48lb54lf97bggp98jgss6kls";
     };
   };
+  # a function that patches the UART base address in a given XCF
+  patchUartInXml = xcf: pkgs.runCommandNoCC "patch-src" { } ''
+    cp -r ${xcf} $out/
+    for file in $(find $out -name hypervisor.xml)
+    do
+      substituteInPlace "$file" --replace 'baseAddr="0xE0001000"' 'baseAddr="0xE0000000"'
+    done
+  '';
   xng-ops = xng-flake-utils.lib.buildXngOps { inherit pkgs; src = srcs.xng; };
   lithos-ops = xng-flake-utils.lib.buildLithOsOps { inherit pkgs; src = srcs.lithos; };
   exampleDir = xng-ops.dev + "/xre-examples";
   genCheckFromExample = { name, partitions, hardFp ? false }: xng-flake-utils.lib.buildXngSysImage {
     inherit name pkgs hardFp;
     xngOps = xng-ops;
-    xcf = exampleDir + "/${name}/xml.armv7a-vmsa-tz";
+    xcf = patchUartInXml (exampleDir + "/${name}/xml.armv7a-vmsa-tz");
     partitions = pkgs.lib.mapAttrs (_: v: { src = exampleDir + "/${name}/${v}"; }) partitions;
   };
   meta = with pkgs.lib; {
@@ -75,7 +83,7 @@ let
           src = lithos-ops + "/examples/${name}/main.c";
           ltcf = lithos-ops + "/examples/${name}/system.ltcf";
         };
-        xcf = "${lithos-ops}/examples/${name}/xml.xng-armv7a-vmsa-tz";
+        xcf = patchUartInXml ("${lithos-ops}/examples/${name}/xml.xng-armv7a-vmsa-tz");
       };
     };
 in
