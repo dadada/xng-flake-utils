@@ -10,5 +10,6 @@ let
   };
 in
 {
-  "${ske-version}-ske-ops" = xng-flake-utils.lib.buildSkeOps { inherit pkgs; src = srcs.ske; };
+  "${xng-flake-utils.lib.replaceDots "${ske-version}-ske-ops"}" =
+    xng-flake-utils.lib.buildSkeOps { inherit pkgs; src = srcs.ske; };
 } 

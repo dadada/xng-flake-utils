@@ -4,6 +4,9 @@
       system = "x86_64-linux";
     in
     rec {
+      # replace '.' in strings with '_'
+      lib.replaceDots = s: builtins.replaceStrings [ "." ] [ "_" ] s;
+
       # build an XNG OPS from a tarball release
       lib.buildXngOps = { pkgs, src ? null, srcs ? null, name ? "xng-ops", target ? "armv7a-vmsa-tz" }:
         let

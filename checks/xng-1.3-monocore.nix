@@ -87,4 +87,9 @@ let
       };
     };
 in
-with pkgs.lib; mapAttrs' (name: value: nameValuePair "${xng-version}-${name}" value) checkDrvs
+with pkgs.lib; mapAttrs'
+  (name: value: nameValuePair
+    (
+      xng-flake-utils.lib.replaceDots "${xng-version}-${name}")
+    value)
+  checkDrvs
