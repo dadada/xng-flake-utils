@@ -38,6 +38,9 @@
                 export XNG_TARGET_CFLAGS="-ffreestanding -mabi=aapcs -mlittle-endian -march=armv7-a \
                     -mtune=cortex-a9 -mfpu=neon -DNEON -D${archDefine} -Wall -Wextra -pedantic -std=c99 \
                     -fno-builtin -O2 -fno-short-enums -mthumb"
+
+                export TARGET_CFLAGS="$XNG_TARGET_CFLAGS"
+                export TARGET_CC="$CC"
               }
               addEnvHooks "$hostOffset" addXngFlags
             '';
@@ -185,11 +188,12 @@
         }:
         let
           target = xngOps.meta.target;
-          fp = if hardFp then "hard" else "soft";
+          fp = if (pkgs.lib.hasAttr "fpu" stdenv.hostPlatform.gcc) then "hard" else "soft";
           baseUrl = "http://www.fentiss.com/";
         in
         # either an lithOsOps is available, or no partition requires one.
         assert lithOsOps != null || pkgs.lib.lists.all ({ enableLithOs ? false, ... }: !enableLithOs) (pkgs.lib.attrValues partitions);
+        assert fp == "soft" || fp == "hard";
         stdenv.mkDerivation {
           inherit name;
           dontUnpack = true;
@@ -230,8 +234,6 @@
 
             # fail on everything
             set -Eeuo pipefail
-
-            export TARGET_CFLAGS="$NIX_CFLAGS_COMPILE $XNG_TARGET_CFLAGS -mfloat-abi=${fp}"
 
             info "building configuration image"
             set -x
@@ -330,7 +332,7 @@
 
             info "building image"
             set -x
-            TARGET_CC="$CC" elfbdr.py ''${args[@]}
+            elfbdr.py ''${args[@]}
             { set +x; } 2>/dev/null
 
             runHook postBuild
