@@ -306,6 +306,7 @@
                     extra_ld_args+=(
                         "-T${lithOsOps}/lds/lithos-xng-${target}.lds"
                         "--start-group"
+                        "-lxre.${fp}fp.armv7a-vmsa-tz"
                         "-lxc.${fp}fp.armv7a-vmsa-tz"
                         "-lfw.${fp}fp.armv7a-vmsa-tz"
                         "--end-group"
