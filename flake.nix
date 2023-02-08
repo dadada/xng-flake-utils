@@ -291,7 +291,57 @@
                     extra_ld_args+=("--require-defined ${if enableLithOs then "main" else "PartitionMain"}")
                 fi
 
-                ${ if enableLithOs then ''
+                ${ if enableLithOs then let
+                    linker-script = pkgs.writeText "lithos-xng.lds" ''
+                        OUTPUT(arm)
+                        ENTRY(Reset)
+                        EXTERN(Reset)
+
+                        SECTIONS
+                        {
+                            .text ALIGN(0x1000): {
+                                sLRO = .;
+                                sLTStext = .;
+                              	_trapTab = .;
+                                *(.lithos.text.bsp.traptab)
+                                *(.lithos.text)
+                                eLTStext = .;
+                                *(.text)
+                                *(.text.*)
+                            }
+                            .rodata ALIGN(8) : {
+                                . = ALIGN(8);
+                                *(.rodata)
+                                . = ALIGN(8);
+                                *(.rodata.*)
+                                *(.eh_frame)
+                                eLRO = .;
+                            }
+
+                            .data ALIGN(8) :  {
+                                sLRW = .;
+                                *(.data)
+                                *(.data.*)
+                            }
+
+                            .bss ALIGN(8) :  {
+                                _bsp_sbss = .;
+                                *(COMMON)
+                                *(.bss)
+                                *(.bss.*)
+                                _bsp_ebss = .;
+                                . = ALIGN(8);
+                                *(.bss.noinit)
+                                *(.bss.noinit.*)
+                                eLRW = .;
+                            }
+                            /DISCARD/ : {
+                                *(.note)
+                                *(.comment*)
+                            }
+                        }
+                    '';
+                in ''
                     [ -f "${ltcf}" ] || {
                         error "unable to find ltcf ${ltcf} for partition ${name}"
                         exit 127
@@ -304,7 +354,8 @@
 
                     object_code+=("${lithOsOps}/lib/lte_kernel.o" "$ltcf_out_file")
                     extra_ld_args+=(
-                        "-T${lithOsOps}/lds/lithos-xng-${target}.lds"
+                        "-T${linker-script}"
+                        # "-T${lithOsOps}/lds/lithos-xng-${target}.lds"
                         "--start-group"
                         "-lxre.${fp}fp.armv7a-vmsa-tz"
                         "-lxc.${fp}fp.armv7a-vmsa-tz"
