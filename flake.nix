@@ -121,17 +121,33 @@
         '';
       };
 
-      lib.buildPartitionC =
-        { pkgs
-        , xns-ops
-        , name
-        , src ? null
-        , srcs ? null
-        , hardFp ? false
-        , stdenv ? (if hardFp then
-            pkgs.pkgsCross.armhf-embedded.stdenv
-          else pkgs.pkgsCross.arm-embedded.stdenv)
-        }: { };
+      # lib.buildPartitionC =
+      #   { pkgs
+      #   , xns-ops
+      #   , name
+      #   , entryPoint
+      #   , src ? null
+      #   , srcs ? null
+      #   , hardFp ? false
+      #   , stdenv ? (if hardFp then
+      #       pkgs.pkgsCross.armhf-embedded.stdenv
+      #     else pkgs.pkgsCross.arm-embedded.stdenv)
+      #   }: {
+      #     buildPhase = ''
+      #       # find main
+      #       set -x
+      #       $CC $src -c -o Partition0.armv7a-vmsa-tz.o partition0.c
+      #       $LD -EL ''${object_code[@]} -o ${name}.${target}.elf -Ttext
+      #       $OBJCOPY -O binary ${name}.${target}.elf ${name}.${target}.bin
+      #       { set +x; } 2>/dev/null
+      #     '';
+      #     installPhase = ''
+      #       mkdir $out
+      #       mv *.elf *.o $out/
+      #     '';
+      #     dontCHeck = true;
+      #     dontFixup = true;
+      #   };
 
 
       lib.load-xml = { pkgs, file }: builtins.fromJSON (builtins.readFile (pkgs.runCommandNoCC "convert-xml-to-json" { }
@@ -140,31 +156,55 @@
       lib.parse-xcf = { pkgs, src }:
         let
           parsed-xml = self.lib.load-xml { inherit pkgs; file = src + "/module.xml"; };
-          updater = attribute: old: (self.lib.load-xml { inherit pkgs; file = src + "/${old."-hRef"}"; }).${attribute};
+          pathToXml = attribute: old: (self.lib.load-xml { inherit pkgs; file = src + "/${old."-hRef"}"; }).${attribute};
+          maybeListToList = old: if (builtins.typeOf old != "list") then [ old ] else old;
           merged = pkgs.lib.updateManyAttrsByPath [
             {
               path = [ "Module" "Channels" ];
-              update = updater "Channels";
+              update = pathToXml "Channels";
             }
             {
               path = [ "Module" "Hypervisor" ];
-              update = updater "Hypervisor";
+              update = pathToXml "Hypervisor";
             }
             {
               path = [ "Module" "MultiPartitionHMTables" ];
-              update = updater "MultiPartitionHmTables"; # Why is the case different between both?!!
+              update = pathToXml "MultiPartitionHmTables"; # Why is the case different between both?!!
             }
             {
               path = [ "Module" "Partitions" ];
-              update = old: builtins.map (updater "Partition") old.${"Partition"};
+              update = old: builtins.map (pathToXml "Partition") old.${"Partition"};
             }
             {
               path = [ "Module" "Schedules" ];
-              update = updater "Schedules";
+              update = pathToXml "Schedules";
             }
           ]
             parsed-xml;
-          expanded-xml = merged;
+          # when converting xml -> json, one sub element becomes a sub
+          # attribute while multiple sub elements with the same tag become a
+          # list. We always want these to be a list, if in question one with
+          # only a single element
+          listsExpanded = pkgs.lib.updateManyAttrsByPath [
+            {
+              path = [ "Module" "Channels" "SamplingChannel" ];
+              update = maybeListToList;
+            }
+            {
+              path = [ "Module" "Channels" "QueuingChannel" ];
+              update = maybeListToList;
+            }
+            {
+              path = [ "Module" "Partitions" ];
+              update = maybeListToList;
+            }
+            {
+              path = [ "Schedules" "Schedule" ];
+              update = maybeListToList;
+            }
+          ]
+            merged;
+          expanded-xml = listsExpanded;
         in
         expanded-xml;
       # lib.build-xcf = { pkgs, xng-ops, xng-config, src }: { };
