@@ -404,6 +404,7 @@
               "python-2.7.18.6"
               "python-2.7.18.6-env"
             ];
+            # https://github.com/NixOS/nixpkgs/pull/42637
             overlays = [
               (final: prev: {
                 requireFile = args: (prev.requireFile args).overrideAttrs (_: { allowSubstitutes = true; });
