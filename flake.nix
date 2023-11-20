@@ -215,10 +215,11 @@
       # compile one XNG configuration using a custom nix/bash based builder
       # partitions is a map of a partition name to an attrset containing the src
       lib.buildXngSysImage =
-        { pkgs
-        , xngOps
-        , name
+        { pkgs # base package set to operate on
+        , xngOps # xng release, can be derived using buildXngOps
+        , name # output name of this derivation
         , partitions
+        , extraBinaryBlobs ? { } # hex address to blob path for extra blobs in the sysimage
         , xcf
         , lithOsOps ? null
         , hardFp ? false
@@ -234,6 +235,16 @@
         # either an lithOsOps is available, or no partition requires one.
         assert lithOsOps != null || pkgs.lib.lists.all ({ enableLithOs ? false, ... }: !enableLithOs) (pkgs.lib.attrValues partitions);
         assert fp == "soft" || fp == "hard";
+        # extraBinaryBlobs must be an attribute set of (string or path)
+        assert builtins.all
+          (builtins.map
+            (x:
+            let type = builtins.typeOf x;
+            in type == "path" || type == "string"
+            )
+            (pkgs.lib.attrsets.attrVals extraBinaryBlobs)
+          );
+
         stdenv.mkDerivation {
           inherit name;
           dontUnpack = true;
@@ -368,6 +379,7 @@
 
               '') partitions)}
 
+            args+=(${ builtins.concatStringsSep " " ( lib.attrsets.mapAttrsToList (addr: src: "\"${src}@${addr}\"") extraBinaryBlobs ) })
             args+=("xcf.${target}.bin@$xcf_entry_point" "sys_img.elf")
 
             info "building image"
