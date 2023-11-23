@@ -16,8 +16,8 @@ let
   xng-ops = xng-flake-utils.lib.buildXngOps { inherit pkgs; src = srcs.xng; };
   lithos-ops = xng-flake-utils.lib.buildLithOsOps { inherit pkgs; src = srcs.lithos; };
   exampleDir = xng-ops.dev + "/xre-examples";
-  genCheckFromExample = { name, partitions, hardFp ? false }: xng-flake-utils.lib.buildXngSysImage {
-    inherit name pkgs hardFp;
+  genCheckFromExample = { name, partitions, hardFp ? false, extraBinaryBlobs ? {} }: xng-flake-utils.lib.buildXngSysImage {
+    inherit extraBinaryBlobs name pkgs hardFp;
     xngOps = xng-ops;
     xcf = pkgs.runCommandNoCC "patch-src" { } ''
       cp -r ${exampleDir + "/${name}/xml"} $out/
@@ -36,6 +36,7 @@ let
     {
       name = "hello_world";
       partitions.Partition0 = "hello_world.c";
+      extraBinaryBlobs = { "0x00050000" = ./testblob; };
     }
     {
       name = "queuing_port";

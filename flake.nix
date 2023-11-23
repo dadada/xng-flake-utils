@@ -235,15 +235,11 @@
         # either an lithOsOps is available, or no partition requires one.
         assert lithOsOps != null || pkgs.lib.lists.all ({ enableLithOs ? false, ... }: !enableLithOs) (pkgs.lib.attrValues partitions);
         assert fp == "soft" || fp == "hard";
+
         # extraBinaryBlobs must be an attribute set of (string or path)
-        assert builtins.all
-          (builtins.map
-            (x:
-            let type = builtins.typeOf x;
-            in type == "path" || type == "string"
-            )
-            (pkgs.lib.attrsets.attrVals extraBinaryBlobs)
-          );
+        assert pkgs.lib.lists.all
+          (path: let type = builtins.typeOf path; in type == "path" || type == "string")
+          (pkgs.lib.attrValues extraBinaryBlobs);
 
         stdenv.mkDerivation {
           inherit name;
@@ -379,7 +375,8 @@
 
               '') partitions)}
 
-            args+=(${ builtins.concatStringsSep " " ( lib.attrsets.mapAttrsToList (addr: src: "\"${src}@${addr}\"") extraBinaryBlobs ) })
+            args+=(${pkgs.lib.escapeShellArgs (pkgs.lib.attrsets.mapAttrsToList (addr: src: "${src}@${addr}") extraBinaryBlobs)})
+
             args+=("xcf.${target}.bin@$xcf_entry_point" "sys_img.elf")
 
             info "building image"
